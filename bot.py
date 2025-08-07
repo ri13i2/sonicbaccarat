@@ -1,22 +1,18 @@
 import os
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
-from telegram import Update, ChatAction
-from telegram.constants import ChatAction  # ✅ 수정된 위치
+from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+    ApplicationBuilder, MessageHandler, ContextTypes, filters
 )
-import asyncio
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
 logging.basicConfig(level=logging.INFO)
 
 users = {}
-bets = {}
-history = {}  # 채팅방별 결과 통계 저장
 
 def get_user(user_id):
     if user_id not in users:
@@ -31,12 +27,9 @@ def get_user(user_id):
         }
     return users[user_id]
 
-# 📌 베팅 커맨드 핸들러
+# 파워떼 배티를 통한 공통 행동
 async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, bet_type: str):
-    user_id = update.effective_user.id
-    chat_id = update.effective_chat.id
-    user = get_user(user_id)
-    name = update.effective_user.first_name
+    user = get_user(update.effective_user.id)
     try:
         amount = int(update.message.text.strip().split()[1])
     except:
@@ -44,7 +37,7 @@ async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, bet_ty
         return
 
     if amount < 10000:
-        await update.message.reply_text("⚠️ 최소 베팅 금액은 10,000원입니다.")
+        await update.message.reply_text("⚠️ 최소 배팅은 10,000원 이상입니다.")
         return
 
     if user["balance"] < amount:
@@ -53,106 +46,96 @@ async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, bet_ty
 
     user["balance"] -= amount
     user["games"] += 1
+    win = random.random() < 0.5
+    if win:
+        user["balance"] += amount * 2
+        user["wins"] += 1
+        await update.message.reply_text(f"🎉 {bet_type} 배팅 성공! 2배 지급!\n💰 포인트: {user['balance']:,}원")
+    else:
+        user["losses"] += 1
+        await update.message.reply_text(f"😭 {bet_type} 배팅 실패!\n💰 포인트: {user['balance']:,}원")
 
-    if chat_id not in bets:
-        bets[chat_id] = {"bets": [], "betting_open": True}
+# 바카라 결과만 보여주는 메시지
+async def baccarat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user(update.effective_user.id)
+    result = random.choice(["플레이어", "방커", "타이"])
+    await update.message.reply_text(f"🎲 바카라 결과: {result}\n💰 현재 포인트: {user['balance']:,}원")
 
-    if not bets[chat_id]["betting_open"]:
-        await update.message.reply_text("⚠️ 현재 게임이 진행 중입니다. 다음 라운드를 기다려주세요.")
+# 출석
+async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user = get_user(user_id)
+    today = datetime.now().date()
+    name = update.effective_user.first_name
+    username = update.effective_user.username or "N/A"
+
+    if user["last_attendance"] == today:
+        await update.message.reply_text("⚠️ 이미 출석체크를 완료하셨습니다\n📅 내일 00시에 다시해주세요!")
         return
 
-    bets[chat_id]["bets"].append({
-        "user_id": user_id,
-        "name": name,
-        "bet_type": bet_type,
-        "amount": amount,
-        "time": datetime.now()
-    })
+    user["last_attendance"] = today
+    user["balance"] += 100000
+    user["exp"] += 2
 
-    await update.message.reply_text(
-        f"🎲 베팅 완료!\n{bet_type} 항목에 {amount:,}원 베팅하셨습니다.\n게임은 30초 후 시작됩니다!"
+    exp_percent = min(int(user["exp"]), 100)
+    exp_bar = "▓" * (exp_percent // 10) + "░" * (10 - exp_percent // 10)
+    win_rate = int((user["wins"] / user["games"]) * 100) if user["games"] > 0 else 0
+
+    msg = (
+        f"✅ 출석체크 완료\n🎁 경험치 +2 및 10만원 지금!\n\n"
+        f"🧑‍🎼 {name}\n"
+        f"🔗 @{username}   🪪 {user_id}   🧱 LV 3\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"💰 보유 금액: {user['balance']:,}원\n"
+        f"🎯 게임 횟수: {user['games']}회\n"
+        f"⚔️ 게임 전적: {user['wins']}승 {user['losses']}패 ({win_rate}%)\n"
+        f"🔋 경험치: {exp_bar} {exp_percent}%\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"Sonic Dice Baccarat"
     )
+    await update.message.reply_text(msg)
 
-    if len(bets[chat_id]["bets"]) == 1:
-        asyncio.create_task(run_game(update, context, chat_id))
+# 훈지 토토
+async def hunji(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user(update.effective_user.id)
+    name = update.effective_user.first_name
 
-# 📌 게임 실행
-async def run_game(update: Update, context: ContextTypes.DEFAULT_TYPE, chat_id: int):
-    bets[chat_id]["betting_open"] = False
-    await context.bot.send_message(chat_id, "🎲 누군가 베팅했습니다!\n⏳ 30초 후 게임이 시작됩니다!\n🚀 서둘러 베팅에 참여하세요!")
-
-    await asyncio.sleep(30)
-
-    await context.bot.send_message(chat_id, "🧿 플레이어 주사위를 굴립니다.")
-    msg1 = await context.bot.send_dice(chat_id, emoji="🎲")
-    await asyncio.sleep(3)
-    msg2 = await context.bot.send_dice(chat_id, emoji="🎲")
-    await asyncio.sleep(3)
-
-    await context.bot.send_message(chat_id, "🧿 뱅커 주사위를 굴립니다.")
-    msg3 = await context.bot.send_dice(chat_id, emoji="🎲")
-    await asyncio.sleep(3)
-    msg4 = await context.bot.send_dice(chat_id, emoji="🎲")
-    await asyncio.sleep(3)
-
-    player_sum = msg1.dice.value + msg2.dice.value
-    banker_sum = msg3.dice.value + msg4.dice.value
-
-    if player_sum > banker_sum:
-        result = "플레이어"
-    elif banker_sum > player_sum:
-        result = "뱅커"
+    if random.random() < 0.4:
+        reward = 300000
+        user["balance"] += reward
+        msg = (
+            f"🧑‍🎼 {name}님 축하합니다!\n"
+            f"🎯 40% 확률에 당첨되셨습니다!\n"
+            f"💸 30만원이 지급되었습니다!\n"
+            f"💰 보유 잔액: {user['balance']:,}원"
+        )
     else:
-        result = "타이"
+        msg = (
+            f"🧑‍🎼 {name}님,\n"
+            f"😢 아쉽게도 이번에는 당첨되지 않았습니다.\n"
+            f"📅 내일 아침 9시 이후 다시 도전해보세요!"
+        )
 
-    await context.bot.send_message(chat_id, f"📢 결과: *{result}* 승!", parse_mode="Markdown")
-    await context.bot.send_message(chat_id, f"🎲 *Player*: {msg1.dice.value} + {msg2.dice.value} = {player_sum}\n🎲 *Banker*: {msg3.dice.value} + {msg4.dice.value} = {banker_sum}", parse_mode="Markdown")
+    await update.message.reply_text(msg)
 
-    # 결과 통계 저장
-    if chat_id not in history:
-        history[chat_id] = {"플레이어": 0, "뱅커": 0, "타이": 0}
-    history[chat_id][result] += 1
-
-    # 베팅 정산
-    for bet in bets[chat_id]["bets"]:
-        user = get_user(bet["user_id"])
-        if bet["bet_type"] == result:
-            user["balance"] += bet["amount"] * 2
-            user["wins"] += 1
-        else:
-            user["losses"] += 1
-
-    bets[chat_id] = {"bets": [], "betting_open": True}
-
-# 📌 /바카라 통계만 출력
-async def baccarat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    data = history.get(chat_id, {"플레이어": 0, "뱅커": 0, "타이": 0})
-    total = sum(data.values())
-
-    recent_results = "\n".join([f"{key}: {val}회" for key, val in data.items()])
-    await update.message.reply_text(
-        f"📊 최근 바카라 결과 (임팩트)\n총 게임 수: {total}\n\n{recent_results}\n\n☝️ 가장 최근 결과가 상단입니다."
-    )
-
-# 기타 명령어 동일 (출석, 충전, 훈지 등)
-# ... (이전 코드에 맞춰 그대로 붙여 사용하세요. 변경 필요 시 알려주세요)
-
-# 📌 메시지 분기 처리
+# 한글 명령어 분기 처리
 async def handle_korean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     if text.startswith("/바카라"):
         await baccarat(update, context)
+    elif text.startswith("/출석"):
+        await attendance(update, context)
+    elif text.startswith("/훈지"):
+        await hunji(update, context)
     elif text.startswith("/뱅"):
         await bet_handler(update, context, "뱅커")
     elif text.startswith("/플"):
         await bet_handler(update, context, "플레이어")
     elif text.startswith("/타이"):
         await bet_handler(update, context, "타이")
-    # 기타 커맨드 (출석, 충전, 훈지 등)도 여기에 이어서 처리
 
-# 📌 실행
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^/"), handle_korean_command))
