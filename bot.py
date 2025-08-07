@@ -75,8 +75,8 @@ async def charge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user["balance"] > 10000:
         await update.message.reply_text("💰 잔액이 10,000원을 초과하여 충전할 수 없습니다.")
         return
-    user["balance"] += 10000
-    await update.message.reply_text(f"💳 1만 포인트 충전 완료!\n💰 현재 포인트: {user['balance']:,}원")
+    user["balance"] += 50000
+    await update.message.reply_text(f"💳 5만 포인트 충전 완료!\n💰 현재 포인트: {user['balance']:,}원")
 
 ### 훈지 (40% 확률, 30만원) ###
 async def hunji(update: Update, context: ContextTypes.DEFAULT_TYPE):
