@@ -5,15 +5,13 @@ from datetime import datetime
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, ContextTypes
+    ApplicationBuilder, MessageHandler, ContextTypes, filters
 )
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-
 logging.basicConfig(level=logging.INFO)
 
-# 사용자 데이터 저장소 (메모리 기반)
 users = {}
 
 def get_user(user_id):
@@ -29,17 +27,11 @@ def get_user(user_id):
         }
     return users[user_id]
 
-### 바카라 게임 ###
-async def baccarat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user(update.effective_user.id)
-    result = random.choice(["플레이어", "뱅커", "타이"])
-    await update.message.reply_text(f"🎲 바카라 결과: {result}\n💰 현재 포인트: {user['balance']:,}원")
-
-### 공통 베팅 처리 ###
+# 📌 공통 베팅 처리
 async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, bet_type: str):
     user = get_user(update.effective_user.id)
     try:
-        amount = int(context.args[0])
+        amount = int(update.message.text.strip().split()[1])
     except:
         await update.message.reply_text(f"❌ 사용법: /{bet_type.lower()} [금액]")
         return
@@ -59,17 +51,23 @@ async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, bet_ty
         user["losses"] += 1
         await update.message.reply_text(f"😭 {bet_type} 베팅 실패!\n💰 포인트: {user['balance']:,}원")
 
-### 축구 ###
+# 🎲 바카라
+async def baccarat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user(update.effective_user.id)
+    result = random.choice(["플레이어", "뱅커", "타이"])
+    await update.message.reply_text(f"🎲 바카라 결과: {result}\n💰 현재 포인트: {user['balance']:,}원")
+
+# ⚽ 축구
 async def soccer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = random.choice(["⚽ 골!", "❌ 노골!"])
     await update.message.reply_text(f"축구 결과: {result}")
 
-### 농구 ###
+# 🏀 농구
 async def basketball(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = random.choice(["🏀 골!", "❌ 노골!"])
     await update.message.reply_text(f"농구 결과: {result}")
 
-### 충전 (1만, 조건부) ###
+# 💳 충전
 async def charge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if user["balance"] > 10000:
@@ -78,29 +76,7 @@ async def charge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user["balance"] += 50000
     await update.message.reply_text(f"💳 5만 포인트 충전 완료!\n💰 현재 포인트: {user['balance']:,}원")
 
-### 훈지 (40% 확률, 30만원) ###
-async def hunji(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user(update.effective_user.id)
-    name = update.effective_user.first_name
-
-    if random.random() < 0.4:
-        reward = 300000
-        user["balance"] += reward
-        msg = (
-            f"🧑‍💼 {name}님 축하합니다!\n"
-            f"🎯 40% 확률에 당첨되셨습니다!\n"
-            f"💸 30만원이 지급되었습니다!\n"
-            f"💰 보유 잔액: {user['balance']:,}원"
-        )
-    else:
-        msg = (
-            f"🧑‍💼 {name}님,\n"
-            f"😢 아쉽게도 이번에는 당첨되지 않았습니다.\n"
-            f"📅 내일 오전 9시 이후 다시 도전해보세요!"
-        )
-    await update.message.reply_text(msg)
-
-### 보상 (1회 30만원) ###
+# 🎁 보상
 async def reward(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(update.effective_user.id)
     if user["reward_claimed"]:
@@ -110,7 +86,7 @@ async def reward(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["reward_claimed"] = True
         await update.message.reply_text("🎁 보상 지급 완료! +30만 포인트")
 
-### 출석 (10만 + 경험치 + 카드 메시지) ###
+# 📅 출석
 async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = get_user(user_id)
@@ -144,24 +120,61 @@ async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(msg)
 
+# 🧧 훈지 (40% 확률, 30만)
+async def hunji(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = get_user(update.effective_user.id)
+    name = update.effective_user.first_name
+
+    if random.random() < 0.4:
+        reward = 300000
+        user["balance"] += reward
+        msg = (
+            f"🧑‍💼 {name}님 축하합니다!\n"
+            f"🎯 40% 확률에 당첨되셨습니다!\n"
+            f"💸 30만원이 지급되었습니다!\n"
+            f"💰 보유 잔액: {user['balance']:,}원"
+        )
+    else:
+        msg = (
+            f"🧑‍💼 {name}님,\n"
+            f"😢 아쉽게도 이번에는 당첨되지 않았습니다.\n"
+            f"📅 내일 오전 9시 이후 다시 도전해보세요!"
+        )
+
+    await update.message.reply_text(msg)
+
+# 💬 한글 명령어 분기 처리
+async def handle_korean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+
+    if text.startswith("/바카라"):
+        await baccarat(update, context)
+    elif text.startswith("/출석"):
+        await attendance(update, context)
+    elif text.startswith("/훈지"):
+        await hunji(update, context)
+    elif text.startswith("/충전"):
+        await charge(update, context)
+    elif text.startswith("/보상"):
+        await reward(update, context)
+    elif text.startswith("/축구"):
+        await soccer(update, context)
+    elif text.startswith("/농구"):
+        await basketball(update, context)
+    elif text.startswith("/뱅페어"):
+        await bet_handler(update, context, "뱅페어")
+    elif text.startswith("/플페어"):
+        await bet_handler(update, context, "플페어")
+    elif text.startswith("/뱅"):
+        await bet_handler(update, context, "뱅커")
+    elif text.startswith("/플"):
+        await bet_handler(update, context, "플레이어")
+    elif text.startswith("/타이"):
+        await bet_handler(update, context, "타이")
+
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
-
-    # 명령어 등록
-    app.add_handler(CommandHandler("바카라", baccarat))
-    app.add_handler(CommandHandler("뱅", lambda u, c: bet_handler(u, c, "뱅커")))
-    app.add_handler(CommandHandler("플", lambda u, c: bet_handler(u, c, "플레이어")))
-    app.add_handler(CommandHandler("플페어", lambda u, c: bet_handler(u, c, "플페어")))
-    app.add_handler(CommandHandler("뱅페어", lambda u, c: bet_handler(u, c, "뱅페어")))
-    app.add_handler(CommandHandler("타이", lambda u, c: bet_handler(u, c, "타이")))
-
-    app.add_handler(CommandHandler("축구", soccer))
-    app.add_handler(CommandHandler("농구", basketball))
-    app.add_handler(CommandHandler("충전", charge))
-    app.add_handler(CommandHandler("훈지", hunji))
-    app.add_handler(CommandHandler("보상", reward))
-    app.add_handler(CommandHandler("출석", attendance))
-
+    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^/"), handle_korean_command))
     print("✅ 소닉 바카라 봇 실행 중...")
     app.run_polling()
 
