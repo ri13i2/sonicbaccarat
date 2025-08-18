@@ -31,7 +31,7 @@ if not BOT_TOKEN:
 WELCOME_TEXT = (
 "➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
 "▫️[텔레그램 유령 자판기]에 오신 것을 환영합니다!\n"
-"▫️텔레그램 가라인원 구매 24h OK\n"
+"▫️텔레그램 유령인원 구매 24h OK\n"
 "▫️하단 메뉴 또는 /start 로 지금 시작하세요!\n"
 "▫️가격은 유동적이며, 대량 구매는 판매자에게!\n"
 "▫️숙지사항 꼭 확인하세요!\n"
@@ -47,18 +47,17 @@ def main_menu_kb():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("유령인원", callback_data="menu:ghost"),
-            InlineKeyboardButton("텔프 유령인원", callback_data="menu:telf_ghost"),
+            InlineKeyboardButton("텔프유령인원", callback_data="menu:telf_ghost"),
         ],
         [
             InlineKeyboardButton("조회수", callback_data="menu:views"),
             InlineKeyboardButton("게시글 반응", callback_data="menu:reactions"),
         ],
         [
-            InlineKeyboardButton("숙지사항 및 사용법", callback_data="menu:notice"),
-            InlineKeyboardButton("판매자 문의하기", url="https://t.me/ghostsalesbot1"),  # ← 실제 링크로 교체
+            InlineKeyboardButton("숙지사항/가이드", callback_data="menu:notice"),
+            InlineKeyboardButton("문의하기", url="https://t.me/YourSellerID"),  # ← 실제 링크
         ],
     ])
-
 
 # ─────────────────────────────────────────────────────────
 # 핸들러들
