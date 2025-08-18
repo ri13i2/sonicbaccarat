@@ -45,13 +45,20 @@ PER_100_PRICE = Decimal("7.21")  # 100명당 가격(총액 표시에만 사용)
 # ─────────────────────────────────────────────────────────
 def main_menu_kb():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("유령인원", callback_data="menu:ghost")],
-        [InlineKeyboardButton("텔프 유령인원", callback_data="menu:telf_ghost")],
-        [InlineKeyboardButton("조회수", callback_data="menu:views")],
-        [InlineKeyboardButton("게시글 반응", callback_data="menu:reactions")],
-        [InlineKeyboardButton("숙지사항 및 사용법", callback_data="menu:notice")],
-        [InlineKeyboardButton("판매자 문의하기", url="https://t.me/YourSellerID")]  # ← 실제 링크로 교체
+        [
+            InlineKeyboardButton("유령인원", callback_data="menu:ghost"),
+            InlineKeyboardButton("텔프 유령인원", callback_data="menu:telf_ghost"),
+        ],
+        [
+            InlineKeyboardButton("조회수", callback_data="menu:views"),
+            InlineKeyboardButton("게시글 반응", callback_data="menu:reactions"),
+        ],
+        [
+            InlineKeyboardButton("숙지사항 및 사용법", callback_data="menu:notice"),
+            InlineKeyboardButton("판매자 문의하기", url="https://t.me/ghostsalesbot1"),  # ← 실제 링크로 교체
+        ],
     ])
+
 
 # ─────────────────────────────────────────────────────────
 # 핸들러들
