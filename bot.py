@@ -1,145 +1,160 @@
+# bot.py
 import os
-import logging
-import random
-from datetime import datetime
+from pathlib import Path
+from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, MessageHandler, ContextTypes, filters
+    ApplicationBuilder, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
 )
 
-load_dotenv()
-TOKEN = os.getenv("8259309280:AAFbfAYPPg8nbdyXuoDuWC_lZbABr8I-SGg")
-logging.basicConfig(level=logging.INFO)
+# ─────────────────────────────────────────────────────────
+# ENV 로드: 로컬 .env(있으면) → 서버(Railway)는 Variables 사용
+# 여러 키 허용(BOT_TOKEN / TOKEN / TELEGRAM_TOKEN)
+# ─────────────────────────────────────────────────────────
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=False)
+BOT_TOKEN = (
+    os.getenv("BOT_TOKEN")
+    or os.getenv("TOKEN")
+    or os.getenv("TELEGRAM_TOKEN")
+)
 
-users = {}
+print("[env] BOT_TOKEN set?:", bool(BOT_TOKEN))  # True/False만 출력
 
-def get_user(user_id):
-    if user_id not in users:
-        users[user_id] = {
-            "balance": 10000,
-            "last_attendance": None,
-            "reward_claimed": False,
-            "exp": 0,
-            "games": 0,
-            "wins": 0,
-            "losses": 0
-        }
-    return users[user_id]
+if not BOT_TOKEN:
+    raise RuntimeError("BOT_TOKEN이 설정되지 않았습니다 (Railway Service → Variables에 BOT_TOKEN 추가 후 재배포).")
 
-# 파워떼 배티를 통한 공통 행동
-async def bet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, bet_type: str):
-    user = get_user(update.effective_user.id)
-    try:
-        amount = int(update.message.text.strip().split()[1])
-    except:
-        await update.message.reply_text(f"❌ 사용법: /{bet_type.lower()} [금액]")
-        return
+# ─────────────────────────────────────────────────────────
+# 상수/문구
+# ─────────────────────────────────────────────────────────
+WELCOME_TEXT = (
+"➖➖➖➖➖➖➖➖➖➖➖➖➖\n"
+"▫️[텔레그램 유령 자판기]에 오신 것을 환영합니다!\n"
+"▫️텔레그램 가라인원 구매 24h OK\n"
+"▫️하단 메뉴 또는 /start 로 지금 시작하세요!\n"
+"▫️가격은 유동적이며, 대량 구매는 판매자에게!\n"
+"▫️숙지사항 꼭 확인하세요!\n"
+"➖➖➖➖➖➖➖➖➖➖➖➖➖"
+)
 
-    if amount < 10000:
-        await update.message.reply_text("⚠️ 최소 배팅은 10,000원 이상입니다.")
-        return
+PER_100_PRICE = Decimal("7.21")  # 100명당 가격(총액 표시에만 사용)
 
-    if user["balance"] < amount:
-        await update.message.reply_text("❌ 보유 금액이 부족합니다.")
-        return
+# ─────────────────────────────────────────────────────────
+# 키보드
+# ─────────────────────────────────────────────────────────
+def main_menu_kb():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("유령인원", callback_data="menu:ghost")],
+        [InlineKeyboardButton("텔프 유령인원", callback_data="menu:telf_ghost")],
+        [InlineKeyboardButton("조회수", callback_data="menu:views")],
+        [InlineKeyboardButton("게시글 반응", callback_data="menu:reactions")],
+        [InlineKeyboardButton("숙지사항 및 사용법", callback_data="menu:notice")],
+        [InlineKeyboardButton("판매자 문의하기", url="https://t.me/YourSellerID")]  # ← 실제 링크로 교체
+    ])
 
-    user["balance"] -= amount
-    user["games"] += 1
-    win = random.random() < 0.5
-    if win:
-        user["balance"] += amount * 2
-        user["wins"] += 1
-        await update.message.reply_text(f"🎉 {bet_type} 배팅 성공! 2배 지급!\n💰 포인트: {user['balance']:,}원")
+# ─────────────────────────────────────────────────────────
+# 핸들러들
+# ─────────────────────────────────────────────────────────
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(WELCOME_TEXT, reply_markup=main_menu_kb())
+
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    if q.data == "menu:ghost":
+        kb = [
+            [InlineKeyboardButton("100명 - 7.21$", callback_data="ghost:100")],
+            [InlineKeyboardButton("500명 - 36.06$", callback_data="ghost:500")],
+            [InlineKeyboardButton("1,000명 - 72.11$", callback_data="ghost:1000")],
+            [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="back:main")]
+        ]
+        await q.edit_message_text("🔹 인원수를 선택하세요", reply_markup=InlineKeyboardMarkup(kb))
+
+    elif q.data.startswith("ghost:"):
+        base = int(q.data.split(":")[1])  # 100/500/1000
+        context.user_data["awaiting_ghost_qty"] = True
+        context.user_data["ghost_base"] = base
+        await q.edit_message_text(
+            f"💫 {base:,}명을 선택하셨습니다!\n"
+            f"📌 몇 개를 구매하시겠습니까?\n\n"
+            f"※ 100단위로만 입력 가능합니다. (예: 600, 1000, 3000)",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")],
+                [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
+            ])
+        )
+
+    elif q.data == "back:main":
+        await q.edit_message_text(WELCOME_TEXT, reply_markup=main_menu_kb())
+
     else:
-        user["losses"] += 1
-        await update.message.reply_text(f"😭 {bet_type} 배팅 실패!\n💰 포인트: {user['balance']:,}원")
+        await q.answer("준비 중입니다.", show_alert=True)
 
-# 바카라 결과만 보여주는 메시지
-async def baccarat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user(update.effective_user.id)
-    result = random.choice(["플레이어", "방커", "타이"])
-    await update.message.reply_text(f"🎲 바카라 결과: {result}\n💰 현재 포인트: {user['balance']:,}원")
-
-# 출석
-async def attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user = get_user(user_id)
-    today = datetime.now().date()
-    name = update.effective_user.first_name
-    username = update.effective_user.username or "N/A"
-
-    if user["last_attendance"] == today:
-        await update.message.reply_text("⚠️ 이미 출석체크를 완료하셨습니다\n📅 내일 00시에 다시해주세요!")
+async def qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 유령인원 수량 입력 처리(100 단위만 허용)
+    if not context.user_data.get("awaiting_ghost_qty"):
         return
 
-    user["last_attendance"] = today
-    user["balance"] += 100000
-    user["exp"] += 2
+    text = update.message.text.strip().replace(",", "")
+    if not text.isdigit():
+        await update.message.reply_text("수량은 숫자만 입력해주세요. (예: 600, 1000)")
+        return
 
-    exp_percent = min(int(user["exp"]), 100)
-    exp_bar = "▓" * (exp_percent // 10) + "░" * (10 - exp_percent // 10)
-    win_rate = int((user["wins"] / user["games"]) * 100) if user["games"] > 0 else 0
+    qty = int(text)
+    if qty < 100 or qty % 100 != 0:
+        await update.message.reply_text("❌ 100단위로 입력해주세요. (예: 600, 1000, 3000)")
+        return
 
-    msg = (
-        f"✅ 출석체크 완료\n🎁 경험치 +2 및 10만원 지금!\n\n"
-        f"🧑‍🎼 {name}\n"
-        f"🔗 @{username}   🪪 {user_id}   🧱 LV 3\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"💰 보유 금액: {user['balance']:,}원\n"
-        f"🎯 게임 횟수: {user['games']}회\n"
-        f"⚔️ 게임 전적: {user['wins']}승 {user['losses']}패 ({win_rate}%)\n"
-        f"🔋 경험치: {exp_bar} {exp_percent}%\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"Sonic Dice Baccarat"
+    context.user_data["awaiting_ghost_qty"] = False
+    context.user_data["ghost_qty"] = qty
+
+    total_msg = ""
+    if PER_100_PRICE:
+        blocks = qty // 100
+        total = (PER_100_PRICE * Decimal(blocks)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        total_msg = f"\n💵 예상 결제금액: {total} USD (100명당 {PER_100_PRICE} USD 기준)"
+
+    await update.message.reply_text(
+        f"✅ 선택 수량: {qty:,}명 확인되었습니다.{total_msg}\n\n"
+        f"다음 단계로 진행하시려면 아래 버튼을 눌러주세요.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🧾 결제 안내 받기", callback_data="ghost:pay")],
+            [InlineKeyboardButton("⬅️ 다시 선택", callback_data="menu:ghost")],
+            [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
+        ])
     )
-    await update.message.reply_text(msg)
 
-# 훈지 토토
-async def hunji(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = get_user(update.effective_user.id)
-    name = update.effective_user.first_name
+async def pay_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    qty = context.user_data.get("ghost_qty")
+    if not qty:
+        await q.answer("먼저 수량을 선택해주세요.", show_alert=True)
+        return
 
-    if random.random() < 0.4:
-        reward = 300000
-        user["balance"] += reward
-        msg = (
-            f"🧑‍🎼 {name}님 축하합니다!\n"
-            f"🎯 40% 확률에 당첨되셨습니다!\n"
-            f"💸 30만원이 지급되었습니다!\n"
-            f"💰 보유 잔액: {user['balance']:,}원"
-        )
-    else:
-        msg = (
-            f"🧑‍🎼 {name}님,\n"
-            f"😢 아쉽게도 이번에는 당첨되지 않았습니다.\n"
-            f"📅 내일 아침 9시 이후 다시 도전해보세요!"
-        )
+    await q.edit_message_text(
+        f"🧾 주문 요약\n"
+        f"- 유령인원: {qty:,}명\n"
+        f"- 결제 단계로 진행합니다.\n\n"
+        f"※ 실제 결제(주소/고유금액/링크)는 추후 연동하세요.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ 뒤로가기", callback_data="menu:ghost")],
+            [InlineKeyboardButton("🏠 메인으로", callback_data="back:main")]
+        ])
+    )
 
-    await update.message.reply_text(msg)
-
-# 한글 명령어 분기 처리
-async def handle_korean_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-
-    if text.startswith("/바카라"):
-        await baccarat(update, context)
-    elif text.startswith("/출석"):
-        await attendance(update, context)
-    elif text.startswith("/훈지"):
-        await hunji(update, context)
-    elif text.startswith("/뱅"):
-        await bet_handler(update, context, "뱅커")
-    elif text.startswith("/플"):
-        await bet_handler(update, context, "플레이어")
-    elif text.startswith("/타이"):
-        await bet_handler(update, context, "타이")
-
-
+# ─────────────────────────────────────────────────────────
+# 앱 구동 (폴링 전용)
+# ─────────────────────────────────────────────────────────
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r"^/"), handle_korean_command))
-    print("✅ 소닉 바카라 봇 실행 중...")
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(menu_handler, pattern=r"^(menu:ghost|ghost:\d+|back:main)$"))
+    app.add_handler(CallbackQueryHandler(pay_handler, pattern=r"^ghost:pay$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, qty_handler))
+    print("✅ 유령 자판기 실행 중... (polling)")
     app.run_polling()
 
 if __name__ == "__main__":
